@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gully Cricketers – La Manga 2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; }
+  input[type=radio], input[type=checkbox] { accent-color: #800000; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+const API = "/api/rsvp";
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+const api = {
+  get: () => fetch(API).then(r => r.json()),
+  post: body => fetch(API, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }).then(r => r.json()),
+  patch: body => fetch(API, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }).then(r => r.json()),
+  del: id => fetch(API, { method:"DELETE", headers:{"Content-Type":"application/json"}, body:JSON.stringify({id}) }).then(r => r.json()),
+};
+
+// ── Reusable components ───────────────────────────────────────────────────────
+const Radio = ({ label, value, checked, onChange }) => (
+  <label className="flex items-start p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-red-50 transition"
+    style={checked ? {backgroundColor:"#fff5f5"} : {}}>
+    <input type="radio" value={value} checked={checked} onChange={onChange} className="mt-0.5 w-4 h-4 flex-shrink-0" />
+    <span className="ml-3 text-sm text-gray-900">{label}</span>
+  </label>
+);
+
+const Badge = ({ ok }) => (
+  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ok ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+    {ok ? "✓ Paid" : "✗ Pending"}
+  </span>
+);
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+const Modal = ({ title, onClose, children }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+    <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full p-6 my-8">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-bold" style={{color:"#800000"}}>{title}</h3>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [view, setView] = useState("home");
+  const [responses, setResponses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [adminAuth, setAdminAuth] = useState(false);
+  const [adminPwd, setAdminPwd] = useState("");
+  const [pwdErr, setPwdErr] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);  // response object
+  const [editPrefs, setEditPrefs] = useState(null);      // response object
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [payDone, setPayDone] = useState(false);
+  const [payAmount, setPayAmount] = useState("100");
+  const [toast, setToast] = useState("");
+  const [form, setForm] = useState({ name:"", playingInterest:"", roomPreference:"", extraDay:"" });
+  const [editForm, setEditForm] = useState({ name:"", playingInterest:"", roomPreference:"", extraDay:"" });
+
+  const ADMIN_PASSWORD = "Tera@2026";
+
+  const showToast = msg => { setToast(msg); setTimeout(() => setToast(""), 4000); };
+
+  const loadResponses = async () => {
+    setLoading(true);
+    try { setResponses(await api.get()); }
+    catch { showToast("Error loading data"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { if (adminAuth && view === "admin") loadResponses(); }, [adminAuth, view]);
+
+  // ── Form validation ───────────────────────────────────────────────────────
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim()) e.name = "Name is required";
+    if (!form.playingInterest) e.playingInterest = "Required";
+    if (!form.roomPreference) e.roomPreference = "Required";
+    if (!form.extraDay) e.extraDay = "Required";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setLoading(true);
+    try {
+      const record = await api.post(form);
+      setSubmitted(true);
+      setForm({ name:"", playingInterest:"", roomPreference:"", extraDay:"" });
+      setTimeout(() => { setSubmitted(false); setView("home"); }, 5000);
+    } catch { showToast("Error saving RSVP. Please try again."); }
+    finally { setLoading(false); }
+  };
+
+  // ── Admin actions ─────────────────────────────────────────────────────────
+  const handleLogin = () => {
+    if (adminPwd === ADMIN_PASSWORD) { setAdminAuth(true); setPwdErr(false); setAdminPwd(""); }
+    else setPwdErr(true);
+  };
+
+  const handlePaymentSave = async () => {
+    const amt = parseFloat(payAmount);
+    if (isNaN(amt) || amt < 0) { showToast("Invalid amount"); return; }
+    try {
+      const updated = await api.patch({
+        id: editPayment.id,
+        payment: { done: payDone, amount: amt, date: payDone ? new Date().toISOString() : null }
+      });
+      setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));
+      setEditPayment(null);
+      showToast("Payment updated ✓");
+    } catch { showToast("Error updating payment"); }
+  };
+
+  const handlePrefsSave = async () => {
+    try {
+      const updated = await api.patch({ id: editPrefs.id, ...editForm });
+      setResponses(prev => prev.map(r => r.id === updated.id ? updated : r));
+      setEditPrefs(null);
+      showToast("Preferences updated ✓");
+    } catch { showToast("Error updating preferences"); }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await api.del(deleteConfirm.id);
+      setResponses(prev => prev.filter(r => r.id !== deleteConfirm.id));
+      setDeleteConfirm(null);
+      showToast("Deleted ✓");
+    } catch { showToast("Error deleting"); }
+  };
+
+  const exportCSV = () => {
+    if (!responses.length) { showToast("No data to export"); return; }
+    const hdrs = ["ID","Name","Playing","Room","Extra Day","Payment Done","Amount","Payment Date","Timestamp"];
+    const playLabel = p => p === "play" ? "Player" : p === "enjoy" ? "Enjoy Only" : "Backup";
+    const extraLabel = e => e === "no" ? "No extra day" : e === "pre" ? "Pre-tour 30/9" : "Post-tour 6/10";
+    const rows = responses.map(r => [
+      r.id, r.name, playLabel(r.playingInterest),
+      r.roomPreference === "single" ? "Single" : "Double",
+      extraLabel(r.extraDay),
+      r.payment?.done ? "Yes" : "No",
+      r.payment?.amount ?? "",
+      r.payment?.date ? new Date(r.payment.date).toLocaleDateString() : "",
+      new Date(r.timestamp).toLocaleString()
+    ]);
+    const csv = [hdrs, ...rows].map(row => row.map(c => `"${c}"`).join(",")).join("\n");
+    const a = Object.assign(document.createElement("a"), {
+      href: URL.createObjectURL(new Blob([csv], {type:"text/csv"})),
+      download: `gully-rsvp-${new Date().toISOString().split("T")[0]}.csv`
+    });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  const s = {
+    total: responses.length,
+    players: responses.filter(r => r.playingInterest === "play").length,
+    enjoy: responses.filter(r => r.playingInterest === "enjoy").length,
+    backup: responses.filter(r => r.playingInterest === "backup").length,
+    single: responses.filter(r => r.roomPreference === "single").length,
+    double: responses.filter(r => r.roomPreference === "double").length,
+    pre: responses.filter(r => r.extraDay === "pre").length,
+    post: responses.filter(r => r.extraDay === "post").length,
+    noExtra: responses.filter(r => r.extraDay === "no").length,
+    paid: responses.filter(r => r.payment?.done).length,
+    pending: responses.filter(r => !r.payment?.done).length,
+    collected: responses.reduce((s, r) => s + (r.payment?.done && r.payment?.amount ? r.payment.amount : 0), 0),
+  };
+
+  const navBtn = (v, label) => (
+    <button onClick={() => setView(v)}
+      className="px-3 py-2 rounded font-medium text-sm"
+      style={view === v ? {backgroundColor:"#800000", color:"white"} : {color:"#800000"}}>
+      {label}
+    </button>
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen" style={{background:"linear-gradient(to bottom right,#5a0000,#800000,#6b4423)"}}>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-xl text-sm">
+          {toast}
+        </div>
+      )}
+
+      {/* Edit Preferences Modal */}
+      {editPrefs && (
+        <Modal title="Edit Preferences" onClose={() => setEditPrefs(null)}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name:e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Playing Interest</label>
+              {[["play","I want to play"],["enjoy","Enjoy but not play"],["backup","Backup player"]].map(([v,l]) => (
+                <Radio key={v} label={l} value={v} checked={editForm.playingInterest===v}
+                  onChange={() => setEditForm({...editForm, playingInterest:v})} />
+              ))}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Room</label>
+              {[["single","Single occupancy"],["double","Double sharing"]].map(([v,l]) => (
+                <Radio key={v} label={l} value={v} checked={editForm.roomPreference===v}
+                  onChange={() => setEditForm({...editForm, roomPreference:v})} />
+              ))}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Extra Day</label>
+              {[["no","No extra day"],["pre","Pre-tour (30/9)"],["post","Post-tour (6/10)"]].map(([v,l]) => (
+                <Radio key={v} label={l} value={v} checked={editForm.extraDay===v}
+                  onChange={() => setEditForm({...editForm, extraDay:v})} />
+              ))}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={handlePrefsSave} className="flex-1 text-white py-2 rounded-lg font-medium text-sm" style={{backgroundColor:"#800000"}}>Save</button>
+              <button onClick={() => setEditPrefs(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-medium text-sm">Cancel</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Payment Modal */}
+      {editPayment && (
+        <Modal title="Update Payment" onClose={() => setEditPayment(null)}>
+          <div className="space-y-4">
+            <label className="flex items-center gap-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-red-50">
+              <input type="checkbox" checked={payDone} onChange={e => setPayDone(e.target.checked)} className="w-5 h-5" />
+              <span className="font-medium">Payment Done</span>
+            </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (£)</label>
+              <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)} step="0.01"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handlePaymentSave} className="flex-1 text-white py-2 rounded-lg font-medium text-sm" style={{backgroundColor:"#800000"}}>Save</button>
+              <button onClick={() => setEditPayment(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-medium text-sm">Cancel</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Confirm Modal */}
+      {deleteConfirm && (
+        <Modal title="Confirm Delete" onClose={() => setDeleteConfirm(null)}>
+          <p className="text-gray-700 mb-4">Delete <strong>{deleteConfirm.name}</strong>'s RSVP? This cannot be undone.</p>
+          <div className="flex gap-2">
+            <button onClick={handleDelete} className="flex-1 bg-red-600 text-white py-2 rounded-lg font-medium text-sm hover:bg-red-700">Delete</button>
+            <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg font-medium text-sm">Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Header */}
+      <header className="bg-white shadow-lg">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0" style={{backgroundColor:"#800000"}}>GC</div>
+            <div>
+              <h1 className="text-2xl font-bold" style={{color:"#800000"}}>Gully Cricketers</h1>
+              <p className="text-xs" style={{color:"#a52a2a"}}>Spain Tour 2026</p>
+            </div>
+          </div>
+          <nav className="flex gap-1">
+            {navBtn("home","Home")}
+            {navBtn("rsvp","RSVP")}
+            {navBtn("admin","Admin")}
+          </nav>
+        </div>
+      </header>
+
+      {/* ── HOME ── */}
+      {view === "home" && (
+        <div className="max-w-4xl mx-auto px-4 py-10">
+          <div className="bg-white rounded-lg shadow-2xl overflow-hidden">
+            <div className="p-10 text-white text-center" style={{background:"linear-gradient(to right,#800000,#a52a2a)"}}>
+              <h2 className="text-4xl font-bold mb-3">La Manga 2026 Tournament</h2>
+              <p className="text-xl mb-5">Join us for an unforgettable cricket tour in Spain!</p>
+              <div className="flex flex-col sm:flex-row justify-center gap-4 text-base">
+                <span>📅 1–5 October 2026</span>
+                <span>📍 La Manga, Spain</span>
+              </div>
+            </div>
+            <div className="p-10 text-center">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
+                {[["🏆","Competitive Cricket","Play against quality opposition in beautiful Spanish weather"],
+                  ["👥","Team Bonding","Strengthen friendships and create lasting memories"],
+                  ["🌍","Amazing Destination","Enjoy the Mediterranean coast and Spanish culture"]
+                ].map(([icon, title, desc]) => (
+                  <div key={title} className="p-6 rounded-lg" style={{backgroundColor:"#fff5f5"}}>
+                    <div className="text-4xl mb-3">{icon}</div>
+                    <h3 className="text-lg font-bold mb-2" style={{color:"#800000"}}>{title}</h3>
+                    <p className="text-sm text-gray-600">{desc}</p>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setView("rsvp")}
+                className="text-white px-8 py-4 rounded-lg text-lg font-bold transition inline-flex items-center gap-2"
+                style={{backgroundColor:"#800000"}}
+                onMouseOver={e => e.currentTarget.style.backgroundColor="#600000"}
+                onMouseOut={e => e.currentTarget.style.backgroundColor="#800000"}>
+                RSVP Now →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RSVP FORM ── */}
+      {view === "rsvp" && (
+        <div className="max-w-2xl mx-auto px-4 py-10">
+          <div className="bg-white rounded-lg shadow-2xl p-6 sm:p-8">
+            <h2 className="text-2xl font-bold mb-6 text-center" style={{color:"#800000"}}>Tour RSVP Form</h2>
+
+            {submitted && (
+              <div className="border px-4 py-3 rounded mb-6 text-sm" style={{backgroundColor:"#fff5f5",borderColor:"#800000",color:"#800000"}}>
+                <p className="font-bold text-base mb-1">You're officially on the radar 🎯</p>
+                <p>Your RSVP has been saved. Make sure your deposit lands before <strong>28/02/2026</strong>. The OC is watching. 🧐</p>
+                <p className="text-xs mt-2 italic">Redirecting to home…</p>
+              </div>
+            )}
+
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1">Your Name <span className="text-red-500">*</span></label>
+                <input type="text" value={form.name} onChange={e => setForm({...form, name:e.target.value})}
+                  placeholder="Full name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-800" />
+                {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
+              </div>
+
+              {[
+                { label:"Playing interest during the trip", key:"playingInterest", err:errors.playingInterest,
+                  opts:[["play","I want to play"],["enjoy","I do not want to play but enjoy"],["backup","Backup – will play if short of players"]] },
+                { label:"Room preference (single has extra charge)", key:"roomPreference", err:errors.roomPreference,
+                  opts:[["single","Single occupancy room (extra charge)"],["double","Double sharing room"]] },
+                { label:"Extra day interest", key:"extraDay", err:errors.extraDay,
+                  opts:[["no","No – stick to 1–5 October"],["pre","Pre-tour day (30/9 → 5/10)"],["post","Post-tour day (1/10 → 6/10)"]] },
+              ].map(({ label, key, err, opts }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">{label} <span className="text-red-500">*</span></label>
+                  <div className="space-y-2">
+                    {opts.map(([v, l]) => (
+                      <Radio key={v} label={l} value={v} checked={form[key]===v}
+                        onChange={() => setForm({...form, [key]:v})} />
+                    ))}
+                  </div>
+                  {err && <p className="text-red-500 text-xs mt-1">{err}</p>}
+                </div>
+              ))}
+
+              <button onClick={handleSubmit} disabled={loading}
+                className="w-full text-white py-3 rounded-lg text-base font-bold transition disabled:opacity-60"
+                style={{backgroundColor:"#800000"}}
+                onMouseOver={e => !loading && (e.currentTarget.style.backgroundColor="#600000")}
+                onMouseOut={e => e.currentTarget.style.backgroundColor="#800000"}>
+                {loading ? "Submitting…" : "Submit RSVP"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADMIN LOGIN ── */}
+      {view === "admin" && !adminAuth && (
+        <div className="max-w-sm mx-auto px-4 py-12">
+          <div className="bg-white rounded-lg shadow-2xl p-8">
+            <h2 className="text-2xl font-bold mb-4 text-center" style={{color:"#800000"}}>Admin Login</h2>
+            {pwdErr && <p className="text-red-500 text-sm mb-3 text-center">Incorrect password</p>}
+            <input type="password" value={adminPwd} onChange={e => setAdminPwd(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleLogin()}
+              placeholder="Password" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3" />
+            <button onClick={handleLogin} className="w-full text-white py-2 rounded-lg font-bold text-sm"
+              style={{backgroundColor:"#800000"}}>Login</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADMIN DASHBOARD ── */}
+      {view === "admin" && adminAuth && (
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-8">
+            <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
+              <h2 className="text-2xl font-bold" style={{color:"#800000"}}>Admin Dashboard</h2>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={loadResponses} className="px-4 py-2 text-sm rounded-lg text-white" style={{backgroundColor:"#800000"}}>↻ Refresh</button>
+                <button onClick={exportCSV} className="px-4 py-2 text-sm rounded-lg text-white" style={{backgroundColor:"#800000"}}>⬇ Export CSV</button>
+                <button onClick={() => setAdminAuth(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-200 text-gray-700">Logout</button>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+              {[["Total",s.total,"#800000"],["Players",s.players,"#1e40af"],["Paid",s.paid,"#166534"],
+                ["Pending",s.pending,"#854d0e"],["£ Collected",`£${s.collected.toFixed(2)}`,"#581c87"]
+              ].map(([label,val,color]) => (
+                <div key={label} className="p-4 rounded-lg border-l-4" style={{backgroundColor:"#f9f9f9",borderColor:color}}>
+                  <div className="text-2xl font-bold" style={{color}}>{val}</div>
+                  <div className="text-xs text-gray-600">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Breakdown cards */}
+            <div className="grid sm:grid-cols-3 gap-4 mb-6">
+              {[
+                { title:"Playing Interest", rows:[["Want to Play",s.players],["Enjoy Only",s.enjoy],["Backup",s.backup]] },
+                { title:"Room Preference", rows:[["Single",s.single],["Double",s.double]] },
+                { title:"Extra Day", rows:[["No extra",s.noExtra],["Pre-tour 30/9",s.pre],["Post-tour 6/10",s.post]] },
+              ].map(({title,rows}) => (
+                <div key={title} className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="font-bold mb-3 text-sm" style={{color:"#800000"}}>{title}</h3>
+                  <div className="space-y-1">
+                    {rows.map(([label,val]) => (
+                      <div key={label} className="flex justify-between items-center bg-white px-3 py-2 rounded text-sm">
+                        <span className="text-gray-600">{label}</span>
+                        <span className="font-bold" style={{color:"#800000"}}>{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Table */}
+            {loading ? <p className="text-center text-gray-500 py-8">Loading…</p> : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead style={{backgroundColor:"#800000"}} className="text-white">
+                    <tr>
+                      {["Name","Playing","Room","Extra Day","Payment","Amount","Actions"].map(h => (
+                        <th key={h} className="px-3 py-3 text-left font-medium whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {responses.map((r, i) => (
+                      <tr key={r.id} className={i % 2 === 0 ? "bg-gray-50" : "bg-white"}>
+                        <td className="px-3 py-2 font-medium">{r.name}</td>
+                        <td className="px-3 py-2 capitalize">{r.playingInterest}</td>
+                        <td className="px-3 py-2 capitalize">{r.roomPreference}</td>
+                        <td className="px-3 py-2">
+                          {r.extraDay === "no" ? "—" : r.extraDay === "pre" ? "Pre (30/9)" : "Post (6/10)"}
+                        </td>
+                        <td className="px-3 py-2"><Badge ok={r.payment?.done} /></td>
+                        <td className="px-3 py-2">{r.payment?.amount ? `£${r.payment.amount}` : "—"}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col gap-1 text-xs">
+                            <button onClick={() => { setEditPrefs(r); setEditForm({ name:r.name, playingInterest:r.playingInterest, roomPreference:r.roomPreference, extraDay:r.extraDay }); }}
+                              className="hover:underline text-left" style={{color:"#800000"}}>✏ Prefs</button>
+                            <button onClick={() => { setEditPayment(r); setPayDone(r.payment?.done||false); setPayAmount(String(r.payment?.amount||100)); }}
+                              className="hover:underline text-left" style={{color:"#800000"}}>💳 Payment</button>
+                            <button onClick={() => setDeleteConfirm(r)}
+                              className="hover:underline text-left text-red-600">🗑 Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!responses.length && <p className="text-center text-gray-500 py-8">No RSVPs yet.</p>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <footer className="text-white py-6 mt-10 text-center text-sm" style={{backgroundColor:"#5a0000"}}>
+        © 2026 Gully Cricketers Cricket Club, Lincs. All rights reserved.
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
