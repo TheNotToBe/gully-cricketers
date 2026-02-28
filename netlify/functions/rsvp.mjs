@@ -1,12 +1,10 @@
-// netlify/functions/rsvp.mjs
-// Single function handling all RSVP CRUD via Google Sheets API
+// netlify/functions/rsvp.mjs - DEBUG VERSION
 
 const SHEET_ID = Netlify.env.get("GOOGLE_SHEET_ID");
 const CLIENT_EMAIL = Netlify.env.get("GOOGLE_SERVICE_ACCOUNT_EMAIL");
 const PRIVATE_KEY = Netlify.env.get("GOOGLE_PRIVATE_KEY")?.replace(/\\n/g, "\n");
 const SHEET_NAME = "RSVPs";
 
-// ── Google Auth (JWT → access token) ─────────────────────────────────────────
 async function getAccessToken() {
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const now = Math.floor(Date.now() / 1000);
@@ -26,8 +24,10 @@ async function getAccessToken() {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
   });
-  const { access_token } = await res.json();
-  return access_token;
+  const tokenData = await res.json();
+  console.log("Token response:", JSON.stringify(tokenData));
+  if (!tokenData.access_token) throw new Error(`Auth failed: ${JSON.stringify(tokenData)}`);
+  return tokenData.access_token;
 }
 
 function b64url(str) {
@@ -53,21 +53,26 @@ function pemToArrayBuffer(pem) {
   return buf.buffer;
 }
 
-// ── Sheets helpers ────────────────────────────────────────────────────────────
 async function sheetsGet(token, range) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`;
+  console.log("GET URL:", url);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  return res.json();
+  const data = await res.json();
+  console.log("GET response:", JSON.stringify(data));
+  return data;
 }
 
 async function sheetsAppend(token, range, values) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  console.log("APPEND URL:", url);
   const res = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ values }),
   });
-  return res.json();
+  const data = await res.json();
+  console.log("APPEND response:", JSON.stringify(data));
+  return data;
 }
 
 async function sheetsUpdate(token, range, values) {
@@ -77,7 +82,9 @@ async function sheetsUpdate(token, range, values) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ values }),
   });
-  return res.json();
+  const data = await res.json();
+  console.log("UPDATE response:", JSON.stringify(data));
+  return data;
 }
 
 async function sheetsClear(token, range) {
@@ -85,8 +92,6 @@ async function sheetsClear(token, range) {
   await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
 }
 
-// ── Row ↔ Object mappers ──────────────────────────────────────────────────────
-// Columns: A=ID, B=Name, C=Playing, D=Room, E=ExtraDay, F=PaymentDone, G=Amount, H=PaymentDate, I=Timestamp
 function rowToObj([id, name, playing, room, extraDay, payDone, amount, payDate, ts]) {
   return {
     id: Number(id),
@@ -117,7 +122,6 @@ function objToRow(r) {
   ];
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
 export default async (req) => {
   const method = req.method.toUpperCase();
   const cors = {
@@ -128,22 +132,28 @@ export default async (req) => {
 
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
+  console.log(`=== ${method} request received ===`);
+  console.log("SHEET_ID:", SHEET_ID);
+  console.log("CLIENT_EMAIL:", CLIENT_EMAIL);
+  console.log("PRIVATE_KEY starts with:", PRIVATE_KEY?.substring(0, 30));
+
   try {
     const token = await getAccessToken();
+    console.log("Access token obtained successfully");
 
-    // GET — fetch all RSVPs
     if (method === "GET") {
       const data = await sheetsGet(token, `${SHEET_NAME}!A2:I`);
-      const rows = (data.values || []).filter(r => r[0]); // skip empty rows
+      const rows = (data.values || []).filter(r => r[0]);
+      console.log(`Found ${rows.length} rows`);
       const rsvps = rows.map(rowToObj);
       return new Response(JSON.stringify(rsvps), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
-    // POST — add new RSVP
     if (method === "POST") {
       const body = await req.json();
+      console.log("POST body:", JSON.stringify(body));
       const id = Date.now();
       const record = { ...body, id, timestamp: id, payment: { done: false, amount: null, date: null } };
       await sheetsAppend(token, `${SHEET_NAME}!A:I`, [objToRow(record)]);
@@ -153,35 +163,29 @@ export default async (req) => {
       });
     }
 
-    // PATCH — update payment or preferences for existing row
     if (method === "PATCH") {
       const body = await req.json();
       const { id } = body;
-
-      // Read all rows to find the target
       const data = await sheetsGet(token, `${SHEET_NAME}!A2:I`);
       const rows = data.values || [];
       const rowIdx = rows.findIndex(r => r[0] === String(id));
+      console.log(`PATCH: looking for id ${id}, found at index ${rowIdx}`);
       if (rowIdx === -1) return new Response("Not found", { status: 404, headers: cors });
-
       const existing = rowToObj(rows[rowIdx]);
       const updated = { ...existing, ...body, payment: { ...existing.payment, ...body.payment } };
-      const sheetRow = rowIdx + 2; // +1 for header, +1 for 1-based index
+      const sheetRow = rowIdx + 2;
       await sheetsUpdate(token, `${SHEET_NAME}!A${sheetRow}:I${sheetRow}`, [objToRow(updated)]);
       return new Response(JSON.stringify(updated), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
-    // DELETE — remove a row by ID
     if (method === "DELETE") {
       const { id } = await req.json();
       const data = await sheetsGet(token, `${SHEET_NAME}!A2:I`);
       const rows = data.values || [];
       const rowIdx = rows.findIndex(r => r[0] === String(id));
       if (rowIdx === -1) return new Response("Not found", { status: 404, headers: cors });
-
-      // Clear the row, then compact (re-write all rows without the deleted one)
       const remaining = rows.filter((_, i) => i !== rowIdx);
       await sheetsClear(token, `${SHEET_NAME}!A2:I`);
       if (remaining.length > 0) {
@@ -194,7 +198,7 @@ export default async (req) => {
 
     return new Response("Method not allowed", { status: 405, headers: cors });
   } catch (err) {
-    console.error(err);
+    console.error("ERROR:", err.message, err.stack);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
       headers: { ...cors, "Content-Type": "application/json" },
