@@ -574,7 +574,7 @@ function App() {
                 <table className="min-w-full text-sm">
                   <thead style={{backgroundColor:"#800000"}} className="text-white">
                     <tr>
-                      {["Name","Room","Payment","Amount","TravelWithGroup?","Actions"].map(h => (
+                      {["Name","First Name","Last Name","Payment","Amount","TravelWithGroup?","Actions"].map(h => (
                         <th key={h} className="px-3 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -583,7 +583,8 @@ function App() {
                     {filteredResponses.map((r, i) => (
                       <tr key={r.id} className={i % 2 === 0 ? "bg-gray-50" : "bg-white"}>
                         <td className="px-3 py-2 font-medium">{r.name}</td>
-                        <td className="px-3 py-2 capitalize">{r.roomPreference}</td>
+                        <td className="px-3 py-2">{r.firstName || <span className="text-gray-400">—</span>}</td>
+                        <td className="px-3 py-2">{r.lastName || <span className="text-gray-400">—</span>}</td>
                         <td className="px-3 py-2"><Badge ok={r.payment?.done} /></td>
                         <td className="px-3 py-2">{r.payment?.amount ? `£${r.payment.amount}` : "—"}</td>
                         <td className="px-3 py-2 text-center">
