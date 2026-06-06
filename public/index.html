@@ -30,43 +30,19 @@ const ADMIN_PASSWORD = "Tera@2026";
 
 // ── Filter definitions ────────────────────────────────────────────────────────
 const FILTERS = [
-  {
-    key: "playingInterest",
-    label: "Playing",
-    options: [
-      { value: "play",   label: "Want to Play" },
-      { value: "enjoy",  label: "Enjoy Only" },
-      { value: "backup", label: "Backup" },
-    ],
-  },
-  {
-    key: "roomPreference",
-    label: "Room",
-    options: [
-      { value: "single", label: "Single" },
-      { value: "double", label: "Double" },
-    ],
-  },
-  {
-    key: "extraDay",
-    label: "Extra Day",
-    options: [
-      { value: "no",   label: "No Extra" },
-      { value: "pre",  label: "Pre (30/9)" },
-      { value: "post", label: "Post (6/10)" },
-    ],
-  },
-  {
-    key: "payment",
-    label: "Payment",
-    options: [
-      { value: "paid",    label: "Paid" },
-      { value: "pending", label: "Pending" },
-    ],
-  },
+  { key: "playingInterest", label: "Playing",
+    options: [{value:"play",label:"Want to Play"},{value:"enjoy",label:"Enjoy Only"},{value:"backup",label:"Backup"}] },
+  { key: "roomPreference", label: "Room",
+    options: [{value:"single",label:"Single"},{value:"double",label:"Double"}] },
+  { key: "extraDay", label: "Extra Day",
+    options: [{value:"no",label:"No Extra"},{value:"pre",label:"Pre (30/9)"},{value:"post",label:"Post (6/10)"}] },
+  { key: "payment", label: "Payment",
+    options: [{value:"paid",label:"Paid"},{value:"pending",label:"Pending"}] },
+  { key: "travel", label: "Travel",
+    options: [{value:"yes",label:"With Group"},{value:"no",label:"Not with Group"}] },
 ];
 
-// ── Small reusable components ─────────────────────────────────────────────────
+// ── Components ────────────────────────────────────────────────────────────────
 const Radio = ({ label, value, checked, onChange }) => (
   <label className="flex items-start p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-red-50 transition"
     style={checked ? {backgroundColor:"#fff5f5"} : {}}>
@@ -93,15 +69,11 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
-// ── Filter pill toggle ────────────────────────────────────────────────────────
 const FilterPill = ({ label, active, onClick }) => (
-  <button
-    onClick={onClick}
-    className="px-3 py-1 rounded-full text-xs font-medium border transition"
+  <button onClick={onClick} className="px-3 py-1 rounded-full text-xs font-medium border transition"
     style={active
       ? { backgroundColor:"#800000", color:"white", borderColor:"#800000" }
-      : { backgroundColor:"white", color:"#800000", borderColor:"#800000" }}
-  >
+      : { backgroundColor:"white", color:"#800000", borderColor:"#800000" }}>
     {label}
   </button>
 );
@@ -123,15 +95,15 @@ function App() {
   const [payAmount, setPayAmount]     = useState("100");
   const [toast, setToast]             = useState("");
   const [form, setForm]               = useState({ name:"", playingInterest:"", roomPreference:"", extraDay:"" });
-  const [editForm, setEditForm]       = useState({ name:"", playingInterest:"", roomPreference:"", extraDay:"" });
+  const [editForm, setEditForm]       = useState({ name:"", playingInterest:"", roomPreference:"", extraDay:"", firstName:"", lastName:"", travelWithGroup:false });
   const [nameSearch, setNameSearch]   = useState("");
 
-  // activeFilters: { playingInterest: Set, roomPreference: Set, extraDay: Set, payment: Set }
   const [activeFilters, setActiveFilters] = useState({
     playingInterest: new Set(),
     roomPreference: new Set(),
     extraDay: new Set(),
     payment: new Set(),
+    travel: new Set(),
   });
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(""), 4000); };
@@ -145,7 +117,7 @@ function App() {
 
   useEffect(() => { if (adminAuth && view === "admin") loadResponses(); }, [adminAuth, view]);
 
-  // ── Toggle a filter pill ────────────────────────────────────────────────────
+  // ── Filter handlers ─────────────────────────────────────────────────────────
   const toggleFilter = (key, value) => {
     setActiveFilters(prev => {
       const next = new Set(prev[key]);
@@ -156,7 +128,7 @@ function App() {
 
   const clearFilters = () => setActiveFilters({
     playingInterest: new Set(), roomPreference: new Set(),
-    extraDay: new Set(), payment: new Set(),
+    extraDay: new Set(), payment: new Set(), travel: new Set(),
   });
 
   const hasActiveFilters = Object.values(activeFilters).some(s => s.size > 0) || nameSearch.trim();
@@ -164,8 +136,14 @@ function App() {
   // ── Filtered rows ───────────────────────────────────────────────────────────
   const filteredResponses = useMemo(() => {
     return responses.filter(r => {
-      // Name search
-      if (nameSearch.trim() && !r.name.toLowerCase().includes(nameSearch.toLowerCase())) return false;
+      // Name search — across Name, FirstName, LastName
+      if (nameSearch.trim()) {
+        const q = nameSearch.toLowerCase();
+        const inName = r.name?.toLowerCase().includes(q);
+        const inFirst = r.firstName?.toLowerCase().includes(q);
+        const inLast = r.lastName?.toLowerCase().includes(q);
+        if (!inName && !inFirst && !inLast) return false;
+      }
       // Playing interest
       if (activeFilters.playingInterest.size > 0 && !activeFilters.playingInterest.has(r.playingInterest)) return false;
       // Room
@@ -175,10 +153,20 @@ function App() {
       // Payment
       if (activeFilters.payment.size > 0) {
         const isPaid = r.payment?.done;
-        if (activeFilters.payment.has("paid") && !isPaid) return false;
-        if (activeFilters.payment.has("pending") && isPaid) return false;
-        // If both selected, show all — no filter needed
-        if (activeFilters.payment.has("paid") && activeFilters.payment.has("pending")) return true;
+        const wantPaid = activeFilters.payment.has("paid");
+        const wantPending = activeFilters.payment.has("pending");
+        if (wantPaid && wantPending) {}
+        else if (wantPaid && !isPaid) return false;
+        else if (wantPending && isPaid) return false;
+      }
+      // Travel
+      if (activeFilters.travel.size > 0) {
+        const isWith = !!r.travelWithGroup;
+        const wantYes = activeFilters.travel.has("yes");
+        const wantNo = activeFilters.travel.has("no");
+        if (wantYes && wantNo) {}
+        else if (wantYes && !isWith) return false;
+        else if (wantNo && isWith) return false;
       }
       return true;
     });
@@ -242,14 +230,18 @@ function App() {
   const exportCSV = () => {
     const src = filteredResponses.length < responses.length ? filteredResponses : responses;
     if (!src.length) { showToast("No data to export"); return; }
-    const hdrs = ["ID","Name","Playing","Room","Extra Day","Payment Done","Amount","Payment Date","Timestamp"];
+    const hdrs = ["ID","Name","First Name","Last Name","Playing","Room","Extra Day","Payment Done","Amount","Payment Date","Travel With Group","Timestamp"];
     const playLabel = p => p === "play" ? "Player" : p === "enjoy" ? "Enjoy Only" : "Backup";
     const extraLabel = e => e === "no" ? "No extra day" : e === "pre" ? "Pre-tour 30/9" : "Post-tour 6/10";
     const rows = src.map(r => [
-      r.id, r.name, playLabel(r.playingInterest),
+      r.id, r.name, r.firstName || "", r.lastName || "",
+      playLabel(r.playingInterest),
       r.roomPreference === "single" ? "Single" : "Double",
-      extraLabel(r.extraDay), r.payment?.done ? "Yes" : "No",
-      r.payment?.amount ?? "", r.payment?.date ? new Date(r.payment.date).toLocaleDateString() : "",
+      extraLabel(r.extraDay),
+      r.payment?.done ? "Yes" : "No",
+      r.payment?.amount ?? "",
+      r.payment?.date ? new Date(r.payment.date).toLocaleDateString() : "",
+      r.travelWithGroup ? "Yes" : "No",
       new Date(r.timestamp).toLocaleString()
     ]);
     const csv = [hdrs, ...rows].map(row => row.map(c => `"${c}"`).join(",")).join("\n");
@@ -260,7 +252,7 @@ function App() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
-  // ── Stats (always based on full dataset) ────────────────────────────────────
+  // ── Stats ───────────────────────────────────────────────────────────────────
   const s = {
     total: responses.length,
     players: responses.filter(r => r.playingInterest === "play").length,
@@ -274,6 +266,7 @@ function App() {
     paid: responses.filter(r => r.payment?.done).length,
     pending: responses.filter(r => !r.payment?.done).length,
     collected: responses.reduce((s, r) => s + (r.payment?.done && r.payment?.amount ? r.payment.amount : 0), 0),
+    travelling: responses.filter(r => r.travelWithGroup).length,
   };
 
   const navBtn = (v, label) => (
@@ -286,7 +279,6 @@ function App() {
   return (
     <div className="min-h-screen" style={{background:"linear-gradient(to bottom right,#5a0000,#800000,#6b4423)"}}>
 
-      {/* Toast */}
       {toast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-xl text-sm">
           {toast}
@@ -302,6 +294,29 @@ function App() {
               <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name:e.target.value})}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                <input type="text" value={editForm.firstName} onChange={e => setEditForm({...editForm, firstName:e.target.value})}
+                  placeholder="(Admin only)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                <input type="text" value={editForm.lastName} onChange={e => setEditForm({...editForm, lastName:e.target.value})}
+                  placeholder="(Admin only)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-3 p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-red-50">
+              <input type="checkbox" checked={editForm.travelWithGroup}
+                onChange={e => setEditForm({...editForm, travelWithGroup:e.target.checked})}
+                className="w-5 h-5" />
+              <span className="text-sm font-medium">TravelWithGroup?</span>
+            </label>
+
             {[
               { label:"Playing Interest", key:"playingInterest", opts:[["play","I want to play"],["enjoy","Enjoy but not play"],["backup","Backup player"]] },
               { label:"Room", key:"roomPreference", opts:[["single","Single occupancy"],["double","Double sharing"]] },
@@ -471,7 +486,6 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 py-8">
           <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-8">
 
-            {/* Header row */}
             <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
               <h2 className="text-2xl font-bold" style={{color:"#800000"}}>Admin Dashboard</h2>
               <div className="flex gap-2 flex-wrap">
@@ -483,10 +497,15 @@ function App() {
               </div>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-              {[["Total",s.total,"#800000"],["Players",s.players,"#1e40af"],["Paid",s.paid,"#166534"],
-                ["Pending",s.pending,"#854d0e"],["£ Collected",`£${s.collected.toFixed(2)}`,"#581c87"]
+            {/* Stats — now 6 cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+              {[
+                ["Total", s.total, "#800000"],
+                ["Players", s.players, "#1e40af"],
+                ["Paid", s.paid, "#166534"],
+                ["Pending", s.pending, "#854d0e"],
+                ["£ Collected", `£${s.collected.toFixed(2)}`, "#581c87"],
+                ["Travelling", `${s.travelling} / ${s.total}`, "#0e7490"],
               ].map(([label,val,color]) => (
                 <div key={label} className="p-4 rounded-lg border-l-4" style={{backgroundColor:"#f9f9f9",borderColor:color}}>
                   <div className="text-2xl font-bold" style={{color}}>{val}</div>
@@ -516,62 +535,46 @@ function App() {
               ))}
             </div>
 
-            {/* ── FILTERS ── */}
+            {/* Filters */}
             <div className="bg-gray-50 rounded-lg p-4 mb-4">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <span className="text-sm font-bold" style={{color:"#800000"}}>🔍 Filter Responses</span>
                 <div className="flex items-center gap-2">
                   {hasActiveFilters && (
-                    <span className="text-xs text-gray-500">
-                      Showing {filteredResponses.length} of {responses.length}
-                    </span>
+                    <span className="text-xs text-gray-500">Showing {filteredResponses.length} of {responses.length}</span>
                   )}
                   {hasActiveFilters && (
-                    <button onClick={clearFilters}
-                      className="text-xs px-2 py-1 rounded bg-gray-200 text-gray-600 hover:bg-gray-300">
-                      Clear all
-                    </button>
+                    <button onClick={clearFilters} className="text-xs px-2 py-1 rounded bg-gray-200 text-gray-600 hover:bg-gray-300">Clear all</button>
                   )}
                 </div>
               </div>
-
-              {/* Name search */}
               <div className="mb-3">
-                <input
-                  type="text"
-                  value={nameSearch}
-                  onChange={e => setNameSearch(e.target.value)}
-                  placeholder="Search by name…"
-                  className="w-full sm:w-64 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none"
-                  style={{borderColor: nameSearch ? "#800000" : ""}}
-                />
+                <input type="text" value={nameSearch} onChange={e => setNameSearch(e.target.value)}
+                  placeholder="Search by name (any name field)…"
+                  className="w-full sm:w-72 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none"
+                  style={{borderColor: nameSearch ? "#800000" : ""}} />
               </div>
-
-              {/* Filter pill groups */}
               <div className="space-y-2">
                 {FILTERS.map(({ key, label, options }) => (
                   <div key={key} className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-gray-500 w-16 flex-shrink-0">{label}:</span>
                     {options.map(({ value, label: optLabel }) => (
-                      <FilterPill
-                        key={value}
-                        label={optLabel}
+                      <FilterPill key={value} label={optLabel}
                         active={activeFilters[key].has(value)}
-                        onClick={() => toggleFilter(key, value)}
-                      />
+                        onClick={() => toggleFilter(key, value)} />
                     ))}
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Table */}
+            {/* Table — Playing & Extra Day columns removed, TravelWithGroup? added */}
             {loading ? <p className="text-center text-gray-500 py-8">Loading…</p> : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead style={{backgroundColor:"#800000"}} className="text-white">
                     <tr>
-                      {["Name","Playing","Room","Extra Day","Payment","Amount","Actions"].map(h => (
+                      {["Name","Room","Payment","Amount","TravelWithGroup?","Actions"].map(h => (
                         <th key={h} className="px-3 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -580,21 +583,29 @@ function App() {
                     {filteredResponses.map((r, i) => (
                       <tr key={r.id} className={i % 2 === 0 ? "bg-gray-50" : "bg-white"}>
                         <td className="px-3 py-2 font-medium">{r.name}</td>
-                        <td className="px-3 py-2 capitalize">{r.playingInterest}</td>
                         <td className="px-3 py-2 capitalize">{r.roomPreference}</td>
-                        <td className="px-3 py-2">
-                          {r.extraDay === "no" ? "—" : r.extraDay === "pre" ? "Pre (30/9)" : "Post (6/10)"}
-                        </td>
                         <td className="px-3 py-2"><Badge ok={r.payment?.done} /></td>
                         <td className="px-3 py-2">{r.payment?.amount ? `£${r.payment.amount}` : "—"}</td>
+                        <td className="px-3 py-2 text-center">
+                          {r.travelWithGroup
+                            ? <span className="text-green-600 font-bold">✓</span>
+                            : <span className="text-gray-400">✗</span>}
+                        </td>
                         <td className="px-3 py-2">
                           <div className="flex flex-col gap-1 text-xs">
-                            <button onClick={() => { setEditPrefs(r); setEditForm({name:r.name,playingInterest:r.playingInterest,roomPreference:r.roomPreference,extraDay:r.extraDay}); }}
+                            <button onClick={() => { setEditPrefs(r); setEditForm({
+                              name: r.name,
+                              playingInterest: r.playingInterest,
+                              roomPreference: r.roomPreference,
+                              extraDay: r.extraDay,
+                              firstName: r.firstName || "",
+                              lastName: r.lastName || "",
+                              travelWithGroup: !!r.travelWithGroup,
+                            }); }}
                               className="hover:underline text-left" style={{color:"#800000"}}>✏ Prefs</button>
                             <button onClick={() => { setEditPayment(r); setPayDone(r.payment?.done||false); setPayAmount(String(r.payment?.amount||100)); }}
                               className="hover:underline text-left" style={{color:"#800000"}}>💳 Payment</button>
-                            <button onClick={() => setDeleteConfirm(r)}
-                              className="hover:underline text-left text-red-600">🗑 Delete</button>
+                            <button onClick={() => setDeleteConfirm(r)} className="hover:underline text-left text-red-600">🗑 Delete</button>
                           </div>
                         </td>
                       </tr>
