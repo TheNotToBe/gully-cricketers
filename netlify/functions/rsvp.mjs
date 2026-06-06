@@ -84,7 +84,9 @@ async function sheetsClear(token, range) {
 }
 
 // ── Row ↔ Object mappers ──────────────────────────────────────────────────────
-function rowToObj([id, name, playing, room, extraDay, payDone, amount, payDate, ts]) {
+// Columns: A=ID, B=Name, C=Playing, D=Room, E=ExtraDay, F=PaymentDone, G=Amount,
+//          H=PaymentDate, I=Timestamp, J=FirstName, K=LastName, L=TravelWithGroup
+function rowToObj([id, name, playing, room, extraDay, payDone, amount, payDate, ts, firstName, lastName, travel]) {
   return {
     id: Number(id),
     name,
@@ -97,6 +99,9 @@ function rowToObj([id, name, playing, room, extraDay, payDone, amount, payDate, 
       date: payDate || null,
     },
     timestamp: Number(ts),
+    firstName: firstName || "",
+    lastName: lastName || "",
+    travelWithGroup: travel === "TRUE",
   };
 }
 
@@ -111,6 +116,9 @@ function objToRow(r) {
     r.payment?.amount != null ? String(r.payment.amount) : "",
     r.payment?.date || "",
     String(r.timestamp),
+    r.firstName || "",
+    r.lastName || "",
+    r.travelWithGroup ? "TRUE" : "FALSE",
   ];
 }
 
@@ -129,7 +137,7 @@ export default async (req) => {
     const token = await getAccessToken();
 
     if (method === "GET") {
-      const data = await sheetsGet(token, `${SHEET_NAME}!A2:I`);
+      const data = await sheetsGet(token, `${SHEET_NAME}!A2:L`);
       const rows = (data.values || []).filter(r => r[0]);
       return new Response(JSON.stringify(rows.map(rowToObj)), {
         headers: { ...cors, "Content-Type": "application/json" },
@@ -139,8 +147,16 @@ export default async (req) => {
     if (method === "POST") {
       const body = await req.json();
       const id = Date.now();
-      const record = { ...body, id, timestamp: id, payment: { done: false, amount: null, date: null } };
-      await sheetsAppend(token, `${SHEET_NAME}!A:I`, [objToRow(record)]);
+      const record = {
+        ...body,
+        id,
+        timestamp: id,
+        payment: { done: false, amount: null, date: null },
+        firstName: "",
+        lastName: "",
+        travelWithGroup: false,
+      };
+      await sheetsAppend(token, `${SHEET_NAME}!A:L`, [objToRow(record)]);
       return new Response(JSON.stringify(record), {
         status: 201,
         headers: { ...cors, "Content-Type": "application/json" },
@@ -150,14 +166,14 @@ export default async (req) => {
     if (method === "PATCH") {
       const body = await req.json();
       const { id } = body;
-      const data = await sheetsGet(token, `${SHEET_NAME}!A2:I`);
+      const data = await sheetsGet(token, `${SHEET_NAME}!A2:L`);
       const rows = data.values || [];
       const rowIdx = rows.findIndex(r => r[0] === String(id));
       if (rowIdx === -1) return new Response("Not found", { status: 404, headers: cors });
       const existing = rowToObj(rows[rowIdx]);
       const updated = { ...existing, ...body, payment: { ...existing.payment, ...body.payment } };
       const sheetRow = rowIdx + 2;
-      await sheetsUpdate(token, `${SHEET_NAME}!A${sheetRow}:I${sheetRow}`, [objToRow(updated)]);
+      await sheetsUpdate(token, `${SHEET_NAME}!A${sheetRow}:L${sheetRow}`, [objToRow(updated)]);
       return new Response(JSON.stringify(updated), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
@@ -165,13 +181,13 @@ export default async (req) => {
 
     if (method === "DELETE") {
       const { id } = await req.json();
-      const data = await sheetsGet(token, `${SHEET_NAME}!A2:I`);
+      const data = await sheetsGet(token, `${SHEET_NAME}!A2:L`);
       const rows = data.values || [];
       const rowIdx = rows.findIndex(r => r[0] === String(id));
       if (rowIdx === -1) return new Response("Not found", { status: 404, headers: cors });
       const remaining = rows.filter((_, i) => i !== rowIdx);
-      await sheetsClear(token, `${SHEET_NAME}!A2:I`);
-      if (remaining.length > 0) await sheetsAppend(token, `${SHEET_NAME}!A2:I`, remaining);
+      await sheetsClear(token, `${SHEET_NAME}!A2:L`);
+      if (remaining.length > 0) await sheetsAppend(token, `${SHEET_NAME}!A2:L`, remaining);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
